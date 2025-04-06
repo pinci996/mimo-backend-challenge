@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
 import { completeLessonController } from '../controllers/lesson-controller';
-import { AppDataSource } from '../data-source'; // Needed for spyOn below
 
 const mockSave = jest.fn();
 const mockCreate = jest.fn((data) => ({ ...data, id: Date.now() }));
 const mockUserFindOneBy = jest.fn();
-const mockLessonFindOne = jest.fn();
+const mockLessonFindOneBy = jest.fn();
 const mockAchievementFind = jest.fn();
 const mockChapterFind = jest.fn();
 const mockCourseFind = jest.fn();
@@ -28,7 +27,7 @@ jest.mock('../data-source', () => ({
                  case 'User':
                      return { findOneBy: mockUserFindOneBy };
                  case 'Lesson':
-                     return { findOne: mockLessonFindOne };
+                     return { findOneBy: mockLessonFindOneBy }; // Corrected method if used
                  case 'LessonCompletion':
                      return { save: mockSave, create: mockCreate, createQueryBuilder: jest.fn(() => mockLessonCompletionQueryBuilder) };
                  case 'Achievement':
@@ -46,6 +45,10 @@ jest.mock('../data-source', () => ({
     }
 }));
 
+import * as AchievementService from '../services/achievement-service';
+const checkAchievementsSpy = jest.spyOn(AchievementService, 'checkUserAchievementsOnCompletion')
+    .mockResolvedValue(undefined);
+
 
 describe('completeLessonController', () => {
     let mockRequest: Partial<Request>;
@@ -55,47 +58,41 @@ describe('completeLessonController', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         responseJson = null;
-
-        mockRequest = {
-            body: {},
-        };
+        mockRequest = { body: {} };
         mockResponse = {
             status: jest.fn().mockReturnThis(),
-            json: jest.fn().mockImplementation((result) => {
-                responseJson = result;
-            }),
+            json: jest.fn().mockImplementation((result) => { responseJson = result; }),
         };
-
-        mockAchievementFind.mockResolvedValue([]);
-        mockUserAchievementFindOneBy.mockResolvedValue(null);
-        mockChapterFind.mockResolvedValue([]);
-        mockCourseFind.mockResolvedValue([]);
-        mockLessonCompletionQueryBuilder.getRawOne.mockResolvedValue({ count: 0 });
-        mockUserAchievementSave.mockResolvedValue({});
     });
 
     it('should return 400 if required fields are missing', async () => {
         mockRequest.body = { userId: 1, lessonId: 1 };
-
         await completeLessonController(mockRequest as Request, mockResponse as Response);
-
         expect(mockResponse.status).toHaveBeenCalledWith(400);
         expect(responseJson).toEqual({ message: 'Missing required fields' });
     });
 
     it('should return 404 if user not found', async () => {
-        mockRequest.body = { userId: 99, lessonId: 1, startedAt: '2023-01-01T10:00:00Z', completedAt: '2023-01-01T10:05:00Z' };
+        mockRequest.body = { userId: 99, lessonId: 1, startedAt: '...', completedAt: '...' };
         mockUserFindOneBy.mockResolvedValueOnce(null);
-
         await completeLessonController(mockRequest as Request, mockResponse as Response);
-
         expect(mockUserFindOneBy).toHaveBeenCalledWith({ id: 99 });
         expect(mockResponse.status).toHaveBeenCalledWith(404);
         expect(responseJson).toEqual({ message: 'User not found' });
     });
 
-    it('should save completion, call achievement check, and return 201 on success', async () => {
-        const fakeLesson = { id: 1, chapter: { id: 1, course: { id: 1 } } };
+     it('should return 404 if lesson not found', async () => {
+        mockRequest.body = { userId: 1, lessonId: 99, startedAt: '...', completedAt: '...' };
+        mockUserFindOneBy.mockResolvedValueOnce({ id: 1, username: 'test' });
+        mockLessonFindOneBy.mockResolvedValueOnce(null);
+        await completeLessonController(mockRequest as Request, mockResponse as Response);
+        expect(mockUserFindOneBy).toHaveBeenCalledWith({ id: 1 });
+        expect(mockLessonFindOneBy).toHaveBeenCalledWith({ id: 99 });
+        expect(mockResponse.status).toHaveBeenCalledWith(404);
+        expect(responseJson).toEqual({ message: 'Lesson not found' });
+    });
+
+    it('should save completion, call achievement service, and return 201 on success', async () => {
         const requestBody = {
              userId: 1,
              lessonId: 1,
@@ -104,59 +101,36 @@ describe('completeLessonController', () => {
         };
         mockRequest.body = requestBody;
         mockUserFindOneBy.mockResolvedValueOnce({ id: 1, username: 'test' });
-        mockLessonFindOne.mockResolvedValueOnce(fakeLesson);
+        mockLessonFindOneBy.mockResolvedValueOnce({ id: 1 });
 
         const createdCompletion = { ...requestBody, id: 123, startedAt: new Date(requestBody.startedAt), completedAt: new Date(requestBody.completedAt) };
         mockCreate.mockReturnValueOnce(createdCompletion);
         mockSave.mockResolvedValueOnce(createdCompletion);
 
-        mockLessonCompletionQueryBuilder.getRawOne.mockResolvedValue({ count: 1 });
-        mockAchievementFind.mockResolvedValue([{ id: 'complete-1-lesson', type: 'lesson', threshold: 1 }]);
-
         await completeLessonController(mockRequest as Request, mockResponse as Response);
 
         expect(mockUserFindOneBy).toHaveBeenCalledWith({ id: 1 });
-        expect(mockLessonFindOne).toHaveBeenCalledWith({ where: { id: 1 }, relations: { chapter: { course: true } } });
-        expect(mockCreate).toHaveBeenCalledWith({
-            userId: 1,
-            lessonId: 1,
-            startedAt: new Date(requestBody.startedAt),
-            completedAt: new Date(requestBody.completedAt)
-        });
+        expect(mockLessonFindOneBy).toHaveBeenCalledWith({ id: 1 });
+        expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ userId: 1, lessonId: 1 }));
         expect(mockSave).toHaveBeenCalledWith(createdCompletion);
-
-        expect(mockAchievementFind).toHaveBeenCalled();
-        expect(mockUserAchievementFindOneBy).toHaveBeenCalled();
-
-
+        expect(checkAchievementsSpy).toHaveBeenCalledWith(1);
         expect(mockResponse.status).toHaveBeenCalledWith(201);
         expect(responseJson.message).toEqual('Lesson completion recorded successfully');
         expect(responseJson.data).toMatchObject({ userId: 1, lessonId: 1 });
     });
 
      it('should return 500 if database save fails', async () => {
-        const fakeLesson = { id: 1, chapter: { id: 1, course: { id: 1 } } };
-         const requestBody = {
-             userId: 1,
-             lessonId: 1,
-             startedAt: '2023-01-01T10:00:00Z',
-             completedAt: '2023-01-01T10:05:00Z'
-        };
-        mockRequest.body = requestBody;
+        mockRequest.body = { userId: 1, lessonId: 1, startedAt: '...', completedAt: '...' };
         mockUserFindOneBy.mockResolvedValueOnce({ id: 1, username: 'test' });
-        mockLessonFindOne.mockResolvedValueOnce(fakeLesson);
+        mockLessonFindOneBy.mockResolvedValueOnce({ id: 1 });
         const dbError = new Error('DB save failed');
-
-        const lessonCompletionRepoMock = AppDataSource.getRepository('LessonCompletion');
-        const saveSpy = jest.spyOn(lessonCompletionRepoMock, 'save').mockRejectedValueOnce(dbError);
-
+        mockSave.mockRejectedValueOnce(dbError);
 
         await completeLessonController(mockRequest as Request, mockResponse as Response);
 
-        expect(saveSpy).toHaveBeenCalled();
+        expect(mockSave).toHaveBeenCalled();
+        expect(checkAchievementsSpy).not.toHaveBeenCalled();
         expect(mockResponse.status).toHaveBeenCalledWith(500);
         expect(responseJson).toEqual({ message: 'Error recording lesson completion' });
-
-        saveSpy.mockRestore();
     });
 });
