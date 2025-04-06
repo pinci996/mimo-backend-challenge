@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: mimo-backend-challenge-app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./sqlite.db:/usr/src/app/sqlite.db
+    environment:
+      - NODE_ENV=production
+      - PORT=3000 
