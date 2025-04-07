@@ -4,15 +4,11 @@ import { User } from "../entity/User";
 import { Lesson } from "../entity/Lesson";
 import { LessonCompletion } from "../entity/LessonCompletion";
 import { checkUserAchievementsOnCompletion } from "../services/achievement-service";
+import { CompleteLessonInput } from "../validation/lesson-schemas";
 
 export const completeLessonController = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { userId, lessonId, startedAt, completedAt } = req.body;
-
-    if (!userId || !lessonId || !startedAt || !completedAt) {
-      res.status(400).json({ message: "Missing required fields" });
-      return;
-    }
+    const { userId, lessonId, startedAt, completedAt } = req.body as CompleteLessonInput;
 
     const userRepository = AppDataSource.getRepository(User);
     const user = await userRepository.findOneBy({ id: userId });
@@ -29,8 +25,8 @@ export const completeLessonController = async (req: Request, res: Response): Pro
     }
 
     const lessonCompletionRepository = AppDataSource.getRepository(LessonCompletion);
-    const startDate = typeof startedAt === 'string' ? new Date(startedAt) : startedAt;
-    const completeDate = typeof completedAt === 'string' ? new Date(completedAt) : completedAt;
+    const startDate = new Date(startedAt);
+    const completeDate = new Date(completedAt);
 
     const newCompletion = lessonCompletionRepository.create({
       userId,

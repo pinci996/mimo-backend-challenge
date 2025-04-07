@@ -65,13 +65,6 @@ describe('completeLessonController', () => {
         };
     });
 
-    it('should return 400 if required fields are missing', async () => {
-        mockRequest.body = { userId: 1, lessonId: 1 };
-        await completeLessonController(mockRequest as Request, mockResponse as Response);
-        expect(mockResponse.status).toHaveBeenCalledWith(400);
-        expect(responseJson).toEqual({ message: 'Missing required fields' });
-    });
-
     it('should return 404 if user not found', async () => {
         mockRequest.body = { userId: 99, lessonId: 1, startedAt: '...', completedAt: '...' };
         mockUserFindOneBy.mockResolvedValueOnce(null);
